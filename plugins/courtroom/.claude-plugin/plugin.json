@@ -1,7 +1,7 @@
 {
   "name": "courtroom",
   "description": "Cross-model deliberation — Claude proposes, Codex cross-examines, they debate, and the verdict gets executed. Two AI models arguing so your code doesn't have to.",
-  "version": "1.0.1",
+  "version": "1.1.0",
   "author": {
     "name": "JustineDaveMagnaye"
   },

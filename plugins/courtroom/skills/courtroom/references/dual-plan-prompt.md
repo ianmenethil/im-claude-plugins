@@ -27,11 +27,13 @@ Produce the plan you would actually implement if this were your task.
 
 ## Files to Consider
 
-The following files are relevant to this task and available in your working directory:
+The following files are relevant to this task (paths relative to your working directory):
 
 {{AFFECTED_FILES}}
 
-Read the files to understand the existing code before proposing your plan.
+Read the files to understand the existing code before proposing your plan. In repository
+mode your working directory is the repository itself and you may read further files in it
+read-only; in copy mode only the files listed above are available.
 
 ---
 

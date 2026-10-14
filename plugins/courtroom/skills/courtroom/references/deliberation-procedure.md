@@ -61,7 +61,7 @@ COURTROOM_DELIB_FILE="<value from conversation context>"
 COURTROOM_DELIB_OUT="<value from conversation context>"
 COURTROOM_WORKDIR="<value from conversation context>"
 test -r "$COURTROOM_DELIB_FILE" || { echo "ERROR: Not readable: $COURTROOM_DELIB_FILE"; exit 1; }
-cat "$COURTROOM_DELIB_FILE" | timeout 150 codex exec --skip-git-repo-check -C "$COURTROOM_WORKDIR" -o "$COURTROOM_DELIB_OUT" - 2>&1
+cat "$COURTROOM_DELIB_FILE" | timeout 150 codex exec --skip-git-repo-check --sandbox read-only -C "$COURTROOM_WORKDIR" -o "$COURTROOM_DELIB_OUT" - 2>&1
 ```
 
 Set the Claude Code Bash tool timeout above the inner `timeout 150` (for example 155,000ms).

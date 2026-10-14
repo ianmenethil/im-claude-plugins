@@ -32,7 +32,8 @@ One JSON object per line. Each line is one completed courtroom session.
   "duration_seconds": 312,
   "mode": "strict",
   "quick": false,
-  "dual_plan": false
+  "dual_plan": false,
+  "repo_access": true
 }
 ```
 
@@ -55,6 +56,7 @@ One JSON object per line. Each line is one completed courtroom session.
 | `mode` | string | `"normal"`, `"strict"`, or `"quick"` |
 | `quick` | boolean | Whether `--quick` was active |
 | `dual_plan` | boolean | Whether `--dual-plan` was active |
+| `repo_access` | boolean | Whether Codex read the repository in place (true) or a copy of the affected files (false) |
 
 ---
 
@@ -103,8 +105,9 @@ DURATION_SECONDS='<elapsed seconds from opening statement to verdict>'
 MODE='<normal | strict | quick>'
 QUICK_BOOL='<true | false>'
 DUAL_PLAN_BOOL='<true | false>'
+REPO_ACCESS='<true | false>'
 # Build JSON
-JSON_LINE="{\"ts\":${TS},\"task_hash\":\"${TASK_HASH}\",\"file_count\":${FILE_COUNT},\"rounds\":${ROUNDS_COMPLETED},\"raw_objections\":${RAW_OBJECTIONS},\"filtered_objections\":${FILTERED_OBJECTIONS},\"surviving_objections\":${SURVIVING_OBJECTIONS},\"accepted\":${ACCEPTED_COUNT},\"rejected\":${REJECTED_COUNT},\"compromised\":${COMPROMISED_COUNT},\"codex_verdict\":\"${CODEX_VERDICT}\",\"duration_seconds\":${DURATION_SECONDS},\"mode\":\"${MODE}\",\"quick\":${QUICK_BOOL},\"dual_plan\":${DUAL_PLAN_BOOL}}"
+JSON_LINE="{\"ts\":${TS},\"task_hash\":\"${TASK_HASH}\",\"file_count\":${FILE_COUNT},\"rounds\":${ROUNDS_COMPLETED},\"raw_objections\":${RAW_OBJECTIONS},\"filtered_objections\":${FILTERED_OBJECTIONS},\"surviving_objections\":${SURVIVING_OBJECTIONS},\"accepted\":${ACCEPTED_COUNT},\"rejected\":${REJECTED_COUNT},\"compromised\":${COMPROMISED_COUNT},\"codex_verdict\":\"${CODEX_VERDICT}\",\"duration_seconds\":${DURATION_SECONDS},\"mode\":\"${MODE}\",\"quick\":${QUICK_BOOL},\"dual_plan\":${DUAL_PLAN_BOOL},\"repo_access\":${REPO_ACCESS}}"
 TEMP_LOG="${LOG_FILE}.tmp.$$"
 printf '%s\n' "$JSON_LINE" > "$TEMP_LOG" \
   || { echo "WARNING: Failed to write temp log; skipping."; exit 0; }

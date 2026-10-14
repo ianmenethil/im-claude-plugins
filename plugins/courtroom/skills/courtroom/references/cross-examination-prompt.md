@@ -22,6 +22,10 @@ These are the files the plan intends to create or modify:
 
 {{AFFECTED_FILES}}
 
+## Repository Access
+
+{{REPO_ACCESS}}
+
 ## Existing Code
 
 Relevant existing code that the plan builds upon or modifies:

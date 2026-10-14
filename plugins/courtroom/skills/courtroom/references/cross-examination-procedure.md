@@ -10,17 +10,89 @@ Never use the Write tool or Python to create files that bash will read.
 
 ---
 
+## Step 0: Resolve Repository Access
+
+Runs BEFORE Step 1: Step 1's substitution rules and Step 1b's chunk sizing depend on
+REPO_ACCESS, and Step 1a prints the assembled prompt. Read-only checks only -- no directory
+creation, which stays in Step 2b.
+
+```bash
+# Re-declare AFFECTED_FILES from conversation context (fresh shell -- no state persists)
+AFFECTED_FILES=(
+  '/absolute/path/to/file1.md'
+  '/absolute/path/to/file2.md'
+)
+GIT_ROOT=$(git rev-parse --show-toplevel 2>/dev/null || echo "")
+REPO_ROOT=""
+if [ -n "$GIT_ROOT" ]; then
+  REPO_ROOT=$(cd "$GIT_ROOT" 2>/dev/null && pwd -P) || REPO_ROOT=""
+fi
+REPO_ACCESS=false
+if [ -n "$REPO_ROOT" ]; then
+  REPO_ACCESS=true
+  for affected_file in "${AFFECTED_FILES[@]}"; do
+    # Missing paths (files the plan proposes to create) are ignored here -- they are
+    # unreadable in either mode, so they cannot constrain the access choice.
+    [ -f "$affected_file" ] || continue
+    file_dir=$(cd "$(dirname "$affected_file")" 2>/dev/null && pwd -P) \
+      || { REPO_ACCESS=false; break; }
+    file_path="${file_dir}/$(basename "$affected_file")"
+    # A symlinked file resolves to its target, so containment is tested on the real path
+    if [ -L "$file_path" ]; then
+      file_path=$(readlink -f "$file_path" 2>/dev/null) \
+        || { REPO_ACCESS=false; break; }
+      [ -n "$file_path" ] || { REPO_ACCESS=false; break; }
+    fi
+    case "$file_path" in
+      "$REPO_ROOT"|"$REPO_ROOT"/*) ;;
+      *) REPO_ACCESS=false; break ;;
+    esac
+  done
+fi
+echo "REPO_ACCESS=$REPO_ACCESS"
+echo "REPO_ROOT=$REPO_ROOT"
+```
+
+Rules:
+
+- `REPO_ACCESS=true` when git resolves a root and every existing affected file resolves
+  inside it. Containment is by path component on canonical paths -- a textual prefix is not
+  enough, and the final path component counts: a file that is a symlink is resolved to its
+  target first. A file whose symlink cannot be resolved with `readlink -f` forces
+  `REPO_ACCESS=false`. A nested repository under the root is fine: the enclosing root reads
+  it. A plan-only session (empty list) or an all-missing list uses the cwd's repository.
+- `REPO_ACCESS=false` when no root resolves, a file resolves outside it, or a symlink is
+  unresolvable. Copy mode (Step 2b) then applies.
+- Store `REPO_ACCESS` and `REPO_ROOT` in conversation context. In repository mode
+  `COURTROOM_WORKDIR` is `REPO_ROOT` -- no temp workdir is created. In copy mode it is the
+  copy directory Step 2b builds.
+
+---
+
 ## Step 1: Build the Codex Prompt (Partial Assembly)
 
 Read template from `${CLAUDE_PLUGIN_ROOT}/skills/courtroom/references/cross-examination-prompt.md`.
 Replace all placeholders EXCEPT {{CODEX_INDEPENDENT_OBSERVATIONS}} (leave that
 token in place — it will be substituted after Step 2b-pre generates the value):
 PROJECT_TYPE, LANGUAGE_FRAMEWORK, PROJECT_CONVENTIONS, AFFECTED_FILES,
-EXISTING_CODE, SKILL_CONTEXT, PROPOSED_PLAN, FORCED_FOCUS, COMPETING_PLANS.
+EXISTING_CODE, SKILL_CONTEXT, PROPOSED_PLAN, FORCED_FOCUS, COMPETING_PLANS, REPO_ACCESS.
+
+For REPO_ACCESS, use the value from Step 0:
+- Repository mode (`REPO_ACCESS=true`): "You have READ-ONLY access to the repository at
+  <REPO_ROOT> through your working directory. Verify any claim about existing code by
+  reading the actual file before writing its `evidence` field. Do not attempt to modify
+  anything."
+- Copy mode (`REPO_ACCESS=false`): "Only the affected files listed above have been copied
+  into your working directory. The wider repository is NOT available. Base claims on the
+  files provided and mark anything you cannot verify as an assumption."
 
 For AFFECTED_FILES: use the Phase 1 file list, one path per line. The empty string in a
 plan-only session (`FILE_CONTEXT=none`) — the same empty-string rule as EXISTING_CODE in
-SKILL.md Phase 2 Step 0.
+SKILL.md Phase 2 Step 0. In repository mode, write them as repository-relative paths.
+
+For EXISTING_CODE: the empty string in repository mode (`REPO_ACCESS=true`) — the reviewer
+reads the files itself, and embedding contents it can read is waste. The SKILL.md Phase 2
+Step 0 definition still applies in copy mode and plan-only sessions.
 
 For SKILL_CONTEXT: use the value built in Phase 2 Step 0 of SKILL.md ("Load Domain Skill
 Context") — the domain-skill block when a skill was named, the empty string when none was.
@@ -80,6 +152,8 @@ If > 60,000: chunking:
    - Supporting: all others.
 2. Each chunk = full template + full plan + file list (paths only) + one file
    content + "Chunk N of M -- <filename>" header + critical-path classification.
+   In repository mode, the chunk carries `Read <repository-relative path> in the
+   repository.` instead of the file content -- the reviewer reads it itself.
    After assembling each chunk, check its total character count:
    - If <= 60,000 chars: proceed.
    - If > 60,000: apply Markdown truncation rules (see below) to the file content
@@ -188,6 +262,10 @@ echo "Stale manifest check complete."
 
 ### Step 2b: Determine the working directory
 
+In repository mode (`REPO_ACCESS=true` from Step 0), `COURTROOM_WORKDIR` is `REPO_ROOT`:
+skip this entire step -- no temp directory is created and no files are copied. Everything
+below applies in copy mode only.
+
 Never use the system temp dir as workdir -- thousands of files exhaust Codex context budget.
 
 ```bash
@@ -287,8 +365,29 @@ silently empty.
 `"INDEPENDENT SCAN SKIPPED: prompt too large for single-pass with observations"` and skip
 directly to Step 2b-post. Do not write an observation prompt or invoke Codex for this step.
 
-Build an observation-only prompt listing the **workdir-relative filenames** (basenames or
-relative paths as actually copied — NOT the original AFFECTED_FILES absolute paths):
+Build an observation-only prompt. List the files by the name Codex will read them under:
+in repository mode, repository-relative paths (never the absolute AFFECTED_FILES paths);
+in copy mode, the workdir-relative names from the copy output.
+
+Repository mode (`REPO_ACCESS=true`):
+
+```
+OBSERVATION TASK: You have read-only access to the repository at <REPO_ROOT>. The files
+below are the focus, by repository-relative path:
+<list each file by its repository-relative name, one per line>
+
+Read each listed file in the repository. For each file:
+1. Summarize what the code does (1-3 sentences)
+2. List any potential risks, edge cases, or architectural patterns you notice
+3. Note anything that seems fragile, inconsistent, or likely to break under change
+
+Do NOT propose solutions. Do NOT evaluate any plan. Simply report what you observe in the code.
+Output your observations as a bulleted list under each filename.
+Keep each file summary under 10 lines. Do not echo or dump raw file contents into your output — summarize
+what you observe.
+```
+
+Copy mode (`REPO_ACCESS=false`):
 
 ```
 OBSERVATION TASK: You have access to a working directory with the following files:
@@ -346,7 +445,7 @@ The `courtroom-` prefix is REQUIRED — the stale cleanup allowlist in Step 2a a
 session cleanup in `${CLAUDE_PLUGIN_ROOT}/skills/courtroom/references/error-handling.md`
 only remove files matching `${TEMP_DIR}/courtroom-*`.
 
-Invoke Codex the same way as Step 2d, with the shorter timeout:
+Invoke Codex the same way as Step 2d:
 
 ```bash
 # Re-declare from conversation context (fresh shell -- no state persists)
@@ -354,10 +453,10 @@ OBS_PROMPT_FILE="<value from conversation context>"
 OBS_OUT_FILE="<value from conversation context>"
 COURTROOM_WORKDIR="<value from conversation context>"
 test -r "$OBS_PROMPT_FILE" || { echo "ERROR: Not readable: $OBS_PROMPT_FILE"; exit 1; }
-cat "$OBS_PROMPT_FILE" | timeout 90 codex exec --skip-git-repo-check -C "$COURTROOM_WORKDIR" -o "$OBS_OUT_FILE" - 2>&1
+cat "$OBS_PROMPT_FILE" | timeout 150 codex exec --skip-git-repo-check --sandbox read-only -C "$COURTROOM_WORKDIR" -o "$OBS_OUT_FILE" - 2>&1
 ```
 
-Set the Claude Code Bash tool timeout above the inner `timeout 90` (for example 95,000ms),
+Set the Claude Code Bash tool timeout above the inner `timeout 150` (for example 155,000ms),
 so `timeout` terminates Codex first and the block still returns.
 
 **On timeout or error:** set CODEX_INDEPENDENT_OBSERVATIONS to the string
@@ -489,7 +588,7 @@ echo "$COURTROOM_CODEX_OUT" >> "$MANIFEST" \
   || { echo "ERROR: Failed to track Codex output file in manifest"; exit 1; }
 
 test -r "$COURTROOM_PROMPT_FILE" || { echo "ERROR: Not readable: $COURTROOM_PROMPT_FILE"; exit 1; }
-cat "$COURTROOM_PROMPT_FILE" | timeout 150 codex exec --skip-git-repo-check -C "$COURTROOM_WORKDIR" -o "$COURTROOM_CODEX_OUT" - 2>&1
+cat "$COURTROOM_PROMPT_FILE" | timeout 150 codex exec --skip-git-repo-check --sandbox read-only -C "$COURTROOM_WORKDIR" -o "$COURTROOM_CODEX_OUT" - 2>&1
 ```
 
 Set the Claude Code Bash tool timeout above the inner `timeout 150` (for example 155,000ms),
@@ -515,9 +614,13 @@ the answer.
   cross-examination / retry manually.
 - Malformed output (no OBJECTION: blocks): Apply Tier 2 re-prompt in Step 3. No original retry.
 - Non-zero exit: Display full stderr. Ask user how to proceed.
-- Codex scans workdir and times out: workdir has leftover files. Re-run Step 2b, then
-  Step 2b-pre, then retry from Step 2d. Do NOT retry from Step 2d directly — the workdir
+- Codex scans workdir and times out (context exhaustion): re-running Step 2b unchanged
+  re-selects the same repository root in repository mode, reproducing the condition. Set
+  `REPO_ACCESS=false` (reason: context exhaustion), rebuild Step 1's substitutions with the
+  copy-mode REPO_ACCESS text, then re-run Step 2b (it copies the affected files), Step
+  2b-pre, and retry from Step 2d. Do NOT retry from Step 2d directly — the workdir
   cleanup removed the copied files, so the copy and observation setup must be rebuilt first.
+  The Phase 6 verdict carries the degraded-access marker.
 
 ### Step 2f: Cleanup prompt file
 
@@ -599,7 +702,24 @@ The option labels and `AskUserQuestion` wording for this step are in
 
 ---
 
-## Step 4: Filter Weak Objections
+## Step 4: Evidence Check, Then Filter Weak Objections
+
+**Evidence check first.** For each objection, verify the `evidence` field against the file
+it names — the real path in repository mode, the copy in copy mode:
+
+- Evidence asserts that something exists in the current tree and it does not (file, symbol,
+  function): the reference is fabricated -> FILTERED with the catalog ID `WO-WRONG-01`.
+  No rebuttal is spent.
+- The named file does not exist yet because the plan proposes creating it, or the file is
+  not available in copy mode: nonexistence proves nothing -> keep, annotate
+  `evidence-not-verifiable`. Show the annotation in the Step 5 display.
+- The file exists but does not support the claim -> keep, annotate
+  `evidence-corrected: <what the file actually says>`. The rebuttal must acknowledge the
+  correction.
+- Annotations never change the confidence score — the confidence filter below runs on
+  Codex's original number, so nothing kept here can be silently filtered later.
+
+Then filter:
 
 Read `${CLAUDE_PLUGIN_ROOT}/skills/courtroom/references/objection-catalog.md`.
 Catalog match -> check whether a concrete technical failure mode remains beyond the catalog pattern.

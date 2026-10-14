@@ -105,15 +105,15 @@ for bucket in ["style:", "yagni:", "validation:", "scope:", "framework:", "wrong
         fails.append(f"SKILL.md filter breakdown is missing the '{bucket[:-1]}' bucket")
 for v in ["FILE_COUNT", "RAW_OBJECTIONS", "FILTERED_OBJECTIONS", "SURVIVING_OBJECTIONS",
           "ACCEPTED_COUNT", "REJECTED_COUNT", "COMPROMISED_COUNT", "CODEX_VERDICT",
-          "DURATION_SECONDS", "QUICK_BOOL", "DUAL_PLAN_BOOL", "CODEX_PLAN_OUT"]:
+          "DURATION_SECONDS", "QUICK_BOOL", "DUAL_PLAN_BOOL", "REPO_ACCESS", "CODEX_PLAN_OUT"]:
     if not re.search(rf"{v}`?\s*=", alltext):
         fails.append(f"{v} is read but never assigned anywhere")
 
-# 10. Codex call bounds are the two declared values: 90s observation pass, 150s otherwise
+# 10. Codex call bound is the one declared value: 150s
 for md in refs:
     for t in sorted(set(re.findall(r"timeout\s+(\d+)", md.read_text()))):
-        if t not in {"90", "150"}:
-            fails.append(f"{md.relative_to(root)}: unexpected timeout bound {t}s (declared bounds are 90 and 150)")
+        if t != "150":
+            fails.append(f"{md.relative_to(root)}: unexpected timeout bound {t}s (the declared bound is 150)")
 
 # 11. never invoke bare `python` -- absent on modern Linux and macOS
 for md in refs:
@@ -125,6 +125,16 @@ for md in refs:
 r = subprocess.run(["claude", "plugin", "validate", "."], cwd=root, capture_output=True, text=True)
 if r.returncode:
     fails.append(f"claude plugin validate failed: {(r.stdout + r.stderr).strip()[:300]}")
+
+# 13. every Codex invocation inside a bash block carries the read-only sandbox, in the
+# order the CLI requires (skip-git-repo-check first, or it errors "No prompt provided
+# via stdin"). Prose that merely mentions "codex exec" is not an invocation.
+INVOCATION = "--skip-git-repo-check --sandbox read-only -C"
+for md in refs:
+    for i, blk in enumerate(re.findall(r"```(?:bash|sh)[ \t]*\n(.*?)```", md.read_text(), re.S), 1):
+        for ln in blk.splitlines():
+            if "codex exec" in ln and INVOCATION not in ln:
+                fails.append(f"{md.relative_to(root)}: bash block {i} invokes codex exec without '{INVOCATION}'")
 
 print(f"checked {len(refs)} markdown files, {blocks} bash blocks, {hits} plugin-root paths")
 for w in warns: print("WARN:", w)

@@ -11,13 +11,13 @@ A fork of [JustineDaveMagnaye/the-courtroom](https://github.com/JustineDaveMagna
 One step:
 
 ```bash
-/plugin install courtroom --marketplace ianmenethil/the-courtroom
+/plugin install courtroom --marketplace ianmenethil/im-claude-plugins
 ```
 
 Or add the marketplace first:
 
 ```bash
-/plugin marketplace add ianmenethil/the-courtroom
+/plugin marketplace add ianmenethil/im-claude-plugins
 /plugin install courtroom
 ```
 
@@ -65,8 +65,9 @@ Or add the marketplace first:
 ## Key Features
 
 - **Weak Objection Catalog** - Auto-filters 22 known false-positive patterns across six categories (style, yagni, validation, scope, framework, wrong)
+- **Repository Access** - When the affected files live in a git repository, Codex reviews it in place, read-only, so it can verify its own evidence instead of trusting a copy
 - **Dual-Plan Mode** - Codex generates an independent plan before seeing Claude's for comparison
-- **Session Logging** - Tracks objection acceptance rates across sessions
+- **Session Logging** - Tracks objection acceptance rates across sessions (including whether Codex had repository access)
 
 ## Requirements
 
@@ -75,17 +76,17 @@ Or add the marketplace first:
 - Network access to OpenAI
 - A writable `$TEMP` directory
 
-Note: the affected files are copied into a temporary working directory and sent to Codex for review. Do not run the courtroom on code that must not leave this machine.
+Note: when the affected files live in a git repository, Codex reads the repository in place, read-only — and may read files beyond the ones you listed. Otherwise the affected files are copied into a temporary working directory and sent to Codex. Either way, code reaches OpenAI: do not run the courtroom on code that must not leave this machine.
 
-**Cost.** Every round makes at least two Codex calls — cross-examination and deliberation. The independent-observation pass, `--dual-plan`, and the retry paths add more, and `--rounds` has no upper limit. `--dry-run` builds and prints the prompt without calling Codex at all, and `--quick` skips the observation pass.
+**Cost.** A default round makes two or three Codex calls — the independent-observation pass, cross-examination, and (once objections exist) deliberation. `--dual-plan` adds one, the retry paths can add more, and `--rounds` has no upper limit. `--dry-run` builds and prints the prompt without calling Codex at all, and `--quick` skips the observation pass.
 
 ## Development checks
 
 Two scripts run against this repo from its root:
 
 ```bash
-python3 scripts/check-plugin.py .   # static: paths, flags, verdict tokens, bash-block variables
-python3 scripts/run-blocks.py .     # executes the self-contained shell blocks in a sandbox
+python3 plugins/courtroom/scripts/check-plugin.py plugins/courtroom   # static: paths, flags, verdict tokens, bash-block variables
+python3 plugins/courtroom/scripts/run-blocks.py plugins/courtroom     # executes the self-contained shell blocks in a sandbox
 ```
 
 `check-plugin.py` exits non-zero on any failure. `run-blocks.py` skips every block that calls

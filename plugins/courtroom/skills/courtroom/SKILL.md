@@ -153,7 +153,8 @@ read-only review context.
 
 **`EXISTING_CODE`** -- the current content of each file listed under **Files to Modify**,
 using the Phase 1 read rule for files over 400 lines (the sections most relevant to the
-task). The empty string in a plan-only session.
+task). The empty string in a plan-only session, and in repository mode (Phase 3 Step 0,
+`REPO_ACCESS=true`), where the reviewer reads the files itself.
 
 ### Step 1: Build the Plan
 
@@ -189,10 +190,15 @@ the Phase 3 procedure, Step 1b).
 Only when `dualPlan=true`. Codex produces its own plan *before* it sees Claude's -- that is
 what makes `{{COMPETING_PLANS}}` meaningful in Phase 3.
 
-1. Ensure the manifest and workdir exist: run Phase 3 Steps 2-init and 2b.
+0. If `dryRun=true`, skip Phase 2.5 entirely -- a dry run makes no Codex calls, and this
+   phase runs before Phase 3 Step 1a reaches its exit. `{{COMPETING_PLANS}}` is then the
+   empty string.
+1. Ensure the manifest and workdir exist: run Phase 3 Steps 2-init and 2b (2b creates the
+   copy workdir in copy mode only; in repository mode Codex reads the repository in place).
 2. Fill `${CLAUDE_PLUGIN_ROOT}/skills/courtroom/references/dual-plan-prompt.md`:
    PROJECT_TYPE, LANGUAGE_FRAMEWORK, PROJECT_CONVENTIONS, TASK_DESCRIPTION, and
-   AFFECTED_FILES by their workdir-relative names.
+   AFFECTED_FILES by the names Codex reads them under (repository-relative paths in
+   repository mode, workdir-relative names in copy mode).
 
 Create the prompt file and Codex's output file now, and track both in the manifest:
 
@@ -232,7 +238,7 @@ Store `CODEX_PLAN_PROMPT` and `CODEX_PLAN_OUT` in conversation context.
 
 3. Write the assembled prompt to `$CODEX_PLAN_PROMPT` (printf rules, Phase 3 Step 2c), then
    invoke Codex with the prompt on stdin:
-   `timeout 150 codex exec --skip-git-repo-check -C "$COURTROOM_WORKDIR" -o "$CODEX_PLAN_OUT" -`
+   `timeout 150 codex exec --skip-git-repo-check --sandbox read-only -C "$COURTROOM_WORKDIR" -o "$CODEX_PLAN_OUT" -`
 4. Read `$CODEX_PLAN_OUT` as `CODEX_INDEPENDENT_PLAN`, then delete the prompt file:
    `rm -f "$CODEX_PLAN_PROMPT"`, re-declaring it from conversation context first (a fresh
    shell carries no state, and `rm -f ""` would succeed silently).
@@ -248,8 +254,13 @@ Store `CODEX_PLAN_PROMPT` and `CODEX_PLAN_OUT` in conversation context.
 Follow the complete procedure in:
 `${CLAUDE_PLUGIN_ROOT}/skills/courtroom/references/cross-examination-procedure.md`
 
+Its Step 0 resolves repository access (`REPO_ACCESS`, `REPO_ROOT`) before any prompt
+assembly: in repository mode Codex reads the repository in place, read-only, and
+`COURTROOM_WORKDIR` is the repository root; otherwise the affected files are copied to a
+temp workdir.
+
 Codex is always invoked as
-`timeout 150 codex exec --skip-git-repo-check -C "$COURTROOM_WORKDIR" -o "$COURTROOM_CODEX_OUT" -`, with the assembled
+`timeout 150 codex exec --skip-git-repo-check --sandbox read-only -C "$COURTROOM_WORKDIR" -o "$COURTROOM_CODEX_OUT" -`, with the assembled
 prompt on stdin. A Bash tool timeout message is the equivalent of that command timing out.
 
 Every cross-examination reply must end with the **Concluding Assessment** block: it is the
@@ -322,7 +333,7 @@ Follow the complete procedure in:
 
 Codex is invoked with the same call as Phase 3, with the deliberation output file as its
 `-o` target:
-`timeout 150 codex exec --skip-git-repo-check -C "$COURTROOM_WORKDIR" -o "$COURTROOM_DELIB_OUT" -`.
+`timeout 150 codex exec --skip-git-repo-check --sandbox read-only -C "$COURTROOM_WORKDIR" -o "$COURTROOM_DELIB_OUT" -`.
 
 If deliberation is skipped: proceed to Phase 6 using the rebuttal-revised plan
 (validation rules apply -- see
@@ -400,6 +411,9 @@ Conditional lines, printed only when they apply:
   none supplied` on a plan-only session; `[QUICK MODE / FORCE OVERRIDE]` with the
   error-handling warning after a forced quick mode; `PLAN: PARTIAL REVIEW (first N sections)`
   after a partial-review answer at the Phase 2 Step 2 gate.
+- Header: `CODEX ACCESS: workdir copy (no repository access)` when `REPO_ACCESS=false` --
+  the reviewer saw copies of the affected files, not the repository, so weaker verification
+  is visible downstream. Also printed when context-exhaustion recovery forced copy mode.
 - Header and Debate Log: `Cross-examination partial: output truncated at N objections` when
   `TRUNCATED=true` (rule:
   `${CLAUDE_PLUGIN_ROOT}/skills/courtroom/references/error-handling.md`
@@ -414,15 +428,16 @@ Conditional lines, printed only when they apply:
 
 Before the log append, record the remaining session values in conversation context: set
 `CODEX_VERDICT = <the verdict token printed above>`, `DURATION_SECONDS = <date +%s minus
-SESSION_START_TS>`, `QUICK_BOOL = <true when --quick is set, else false>` and
-`DUAL_PLAN_BOOL = <true when --dual-plan is set, else false>`.
+SESSION_START_TS>`, `QUICK_BOOL = <true when --quick is set, else false>`,
+`DUAL_PLAN_BOOL = <true when --dual-plan is set, else false>` and
+`REPO_ACCESS = <true when Codex read the repository in place, false when it saw copies>`.
 
 If `--log` is set: append the session record now, before the approval question, using the
 Append Section of
 `${CLAUDE_PLUGIN_ROOT}/skills/courtroom/references/session-logging.md`, with FILE_COUNT,
 ROUNDS_COMPLETED, RAW_OBJECTIONS, FILTERED_OBJECTIONS, SURVIVING_OBJECTIONS, ACCEPTED_COUNT,
 REJECTED_COUNT, COMPROMISED_COUNT, CODEX_VERDICT, DURATION_SECONDS (`date +%s` minus
-SESSION_START_TS), MODE, QUICK_BOOL and DUAL_PLAN_BOOL all in scope.
+SESSION_START_TS), MODE, QUICK_BOOL, DUAL_PLAN_BOOL and REPO_ACCESS all in scope.
 
 If `--auto-execute` is NOT set: ask the user via `AskUserQuestion` "Shall I execute this
 plan? (yes / no / revise)"

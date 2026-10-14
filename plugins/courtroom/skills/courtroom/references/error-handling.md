@@ -64,7 +64,11 @@ reached. The Concluding Assessment block is the completeness signal.
 ### Workdir Contains Many Files (Codex Context Exhaustion)
 
 If Codex output is mostly file listings with no objection content, it burned its context
-budget scanning the workdir. Fix:
+budget scanning the workdir.
+
+In repository mode, switch to copy mode first: set `REPO_ACCESS=false` (reason: context
+exhaustion) and rebuild Step 1's `{{REPO_ACCESS}}` substitution — re-running Step 2b
+otherwise re-selects the same repository root and reproduces the exhaustion. Fix:
 
 ```bash
 TEMP_DIR="${TEMP:-${TMP:-/tmp}}"
@@ -212,6 +216,7 @@ fi
 # Re-declare from conversation context (fresh shell -- no state persists)
 MANIFEST="<value from conversation context>"
 COURTROOM_WORKDIR="<value from conversation context>"
+REPO_ACCESS="<true | false>"
 set +e
 if [ -f "$MANIFEST" ]; then
   while IFS= read -r temp_file || [ -n "$temp_file" ]; do
@@ -222,15 +227,18 @@ if [ -f "$MANIFEST" ]; then
   done < "$MANIFEST"
   rm -f "$MANIFEST"
 fi
-# Clean the workdir (only a workflow-owned $TEMP_DIR/courtroom-* path)
-case "$COURTROOM_WORKDIR" in
-  "${TEMP_DIR}"/courtroom-*)
-    if [ -d "$COURTROOM_WORKDIR" ]; then
-      find "$COURTROOM_WORKDIR" -mindepth 1 -maxdepth 1 -exec rm -rf -- {} + 2>/dev/null
-    fi
-    ;;
-  *) echo "WARNING: Skipping unexpected workdir: $COURTROOM_WORKDIR" ;;
-esac
+# Clean the workdir (only a workflow-owned $TEMP_DIR/courtroom-* path).
+# Repository mode creates no temp workdir: REPO_ROOT is not ours to clean.
+if [ "$REPO_ACCESS" != "true" ]; then
+  case "$COURTROOM_WORKDIR" in
+    "${TEMP_DIR}"/courtroom-*)
+      if [ -d "$COURTROOM_WORKDIR" ]; then
+        find "$COURTROOM_WORKDIR" -mindepth 1 -maxdepth 1 -exec rm -rf -- {} + 2>/dev/null
+      fi
+      ;;
+    *) echo "WARNING: Skipping unexpected workdir: $COURTROOM_WORKDIR" ;;
+  esac
+fi
 set -e
 echo "Courtroom temp files cleaned up."
 ```
