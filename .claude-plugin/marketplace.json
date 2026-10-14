@@ -1,0 +1,22 @@
+{
+  "name": "im-claude-plugins",
+  "owner": {
+    "name": "ianmenethil"
+  },
+  "metadata": {
+    "description": "Claude Code plugins — cross-model plan deliberation, and local session memory",
+    "version": "1.1.0"
+  },
+  "plugins": [
+    {
+      "name": "courtroom",
+      "source": "./plugins/courtroom",
+      "description": "Cross-model deliberation plugin — Claude and Codex debate your implementation plan before execution"
+    },
+    {
+      "name": "recall",
+      "source": "./plugins/recall",
+      "description": "Local evidence recall across Claude Code and Codex histories: durable text and tool-request retrieval, checked citations, compaction recovery, optional private coding sessions, and separately configured Claude app readers."
+    }
+  ]
+}
